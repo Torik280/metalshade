@@ -207,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 // Poll window position every 150ms to follow window movement
                 self.trackingTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-                    self?.updateOverlayPosition()
+                    DispatchQueue.main.async { self?.updateOverlayPosition() }
                 }
             } catch {
                 print("Capture error: \(error)")
@@ -216,13 +216,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateOverlayPosition() {
-        guard let windowID = currentWindowID, let screen = NSScreen.main else { return }
-        Task {
-            let windows = await CaptureEngine.availableWindows()
-            guard let win = windows.first(where: { $0.windowID == windowID }) else { return }
-            await MainActor.run {
-                self.overlayWindow?.matchWindow(cgFrame: win.frame, on: screen)
-            }
+        guard let windowID = currentWindowID else { return }
+        Task { @MainActor in
+            guard let windows = try? await CaptureEngine.availableWindows(),
+                  let win = windows.first(where: { $0.windowID == windowID }),
+                  let screen = NSScreen.main else { return }
+            self.overlayWindow?.matchWindow(cgFrame: win.frame, on: screen)
         }
     }
 
