@@ -40,9 +40,8 @@ final class CaptureEngine: NSObject {
                 let bounds = info[kCGWindowBounds      as String]
             else { return nil }
 
-            let rect = CGRect(dictionaryRepresentation: bounds as! CFDictionary)
-            // Skip tiny system UI elements
-            guard rect.width > 100 && rect.height > 100 else { return nil }
+            guard let rect = CGRect(dictionaryRepresentation: bounds as! CFDictionary),
+                  rect.width > 100, rect.height > 100 else { return nil }
 
             return WindowInfo(windowID: wid, title: title, appName: app, pid: pid, frame: rect)
         }

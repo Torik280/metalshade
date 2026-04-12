@@ -4,6 +4,7 @@ import Combine
 import ScreenCaptureKit
 import UniformTypeIdentifiers
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let shaderManager = ShaderManager()
