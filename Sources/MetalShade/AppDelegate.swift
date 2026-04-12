@@ -153,11 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let frame = try await engine.start(appPID: app.pid)
                 guard let screen = NSScreen.main else { return }
-                // Overlay covers the full display (app content fills it via SCKit filter)
                 self.overlayWindow?.matchWindow(cgFrame: frame, on: screen)
                 if self.shaderManager.isEnabled { self.overlayWindow?.orderFront(nil) }
             } catch {
-                self.showError(error.localizedDescription)
+                self.showCapturePermissionError(error)
             }
         }
     }
@@ -243,14 +242,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let err = PresetManager.save(effects: shaderManager.effects, to: url) { showError(err) }
     }
 
-    private func showError(_ message: String) {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText     = "Ошибка"
-            alert.informativeText = message
-            alert.alertStyle      = .warning
-            alert.runModal()
+    private func showCapturePermissionError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Нет доступа к захвату экрана"
+        alert.informativeText = """
+            macOS требует разрешение заново после каждой пересборки приложения.
+
+            Сделай следующее:
+            1. Открой Системные настройки → Конфиденциальность и безопасность → Запись экрана
+            2. Найди MetalShade в списке — сними галочку и поставь снова
+               (или нажми «+» и добавь MetalShade вручную)
+            3. Перезапусти MetalShade
+
+            Ошибка: \(error.localizedDescription)
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Открыть настройки")
+        alert.addButton(withTitle: "Закрыть")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(
+                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+            )
         }
+    }
+
+    private func showError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText     = "Ошибка"
+        alert.informativeText = message
+        alert.alertStyle      = .warning
+        alert.runModal()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
