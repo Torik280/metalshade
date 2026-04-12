@@ -3,7 +3,6 @@
     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Not sandboxed — required for ScreenCaptureKit outside the App Store -->
     <key>com.apple.security.app-sandbox</key>
     <false/>
 </dict>

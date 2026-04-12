@@ -1,16 +1,10 @@
-// MSL shader source embedded as a Swift string.
-// Compiled at runtime via MTLDevice.makeLibrary(source:options:)
-// so users can modify / extend shaders without recompiling the app.
-
 let builtinShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
 
-// ─── Sharpen ────────────────────────────────────────────────────────────────
-// Unsharp mask: amplifies high-frequency detail.
 kernel void fx_sharpen(
-    texture2d<float, access::read>  inTex  [[texture(0)]],
-    texture2d<float, access::write> outTex [[texture(1)]],
+    texture2d<float, access::read>  inTex     [[texture(0)]],
+    texture2d<float, access::write> outTex    [[texture(1)]],
     constant float&                 intensity [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
@@ -27,35 +21,28 @@ kernel void fx_sharpen(
     outTex.write(clamp(c + lap * intensity * 0.8, 0.0, 1.0), gid);
 }
 
-// ─── Vibrance ───────────────────────────────────────────────────────────────
-// Boosts saturation more on desaturated pixels — avoids clipping already-vivid colours.
 kernel void fx_vibrance(
-    texture2d<float, access::read>  inTex  [[texture(0)]],
-    texture2d<float, access::write> outTex [[texture(1)]],
+    texture2d<float, access::read>  inTex     [[texture(0)]],
+    texture2d<float, access::write> outTex    [[texture(1)]],
     constant float&                 intensity [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
     uint w = inTex.get_width(), h = inTex.get_height();
     if (gid.x >= w || gid.y >= h) return;
 
-    float4 c = inTex.read(gid);
-    float maxC = max(c.r, max(c.g, c.b));
-    float minC = min(c.r, min(c.g, c.b));
-    float sat  = maxC - minC;                          // 0 = grey, 1 = full colour
-    float luma = dot(c.rgb, float3(0.2126, 0.7152, 0.0722));
-
-    // The less saturated, the more we boost
+    float4 c    = inTex.read(gid);
+    float maxC  = max(c.r, max(c.g, c.b));
+    float minC  = min(c.r, min(c.g, c.b));
+    float sat   = maxC - minC;
+    float luma  = dot(c.rgb, float3(0.2126, 0.7152, 0.0722));
     float boost = (intensity * 1.2) * (1.0 - sat);
     c.rgb = mix(float3(luma), c.rgb, 1.0 + boost);
     outTex.write(clamp(c, 0.0, 1.0), gid);
 }
 
-// ─── Bloom ──────────────────────────────────────────────────────────────────
-// Extracts bright areas, blurs them, and blends additively.
-// Uses a small separable approximation for performance.
 kernel void fx_bloom(
-    texture2d<float, access::read>  inTex  [[texture(0)]],
-    texture2d<float, access::write> outTex [[texture(1)]],
+    texture2d<float, access::read>  inTex     [[texture(0)]],
+    texture2d<float, access::write> outTex    [[texture(1)]],
     constant float&                 intensity [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
@@ -63,9 +50,7 @@ kernel void fx_bloom(
     if (gid.x >= w || gid.y >= h) return;
 
     float4 original = inTex.read(gid);
-
-    // Gaussian weights for radius-4 kernel: σ≈1.5
-    const int   R       = 4;
+    const int   R          = 4;
     const float weights[5] = {0.2270, 0.1945, 0.1216, 0.0540, 0.0162};
 
     float4 glow   = float4(0.0);
@@ -73,29 +58,22 @@ kernel void fx_bloom(
 
     for (int dy = -R; dy <= R; dy++) {
         for (int dx = -R; dx <= R; dx++) {
-            uint2 sp = uint2(
-                clamp(int(gid.x)+dx, 0, int(w)-1),
-                clamp(int(gid.y)+dy, 0, int(h)-1)
-            );
+            uint2  sp    = uint2(clamp(int(gid.x)+dx, 0, int(w)-1), clamp(int(gid.y)+dy, 0, int(h)-1));
             float4 s     = inTex.read(sp);
             float  luma  = dot(s.rgb, float3(0.2126, 0.7152, 0.0722));
-            float  bright = max(0.0, luma - 0.55);    // threshold: only bright pixels
+            float  bright = max(0.0, luma - 0.55);
             float  w_xy  = weights[abs(dx)] * weights[abs(dy)];
             glow   += s * bright * w_xy;
             wTotal += w_xy;
         }
     }
     glow = (wTotal > 0.0) ? (glow / wTotal) : float4(0.0);
-
-    float4 result = original + glow * intensity * 1.5;
-    outTex.write(clamp(result, 0.0, 1.0), gid);
+    outTex.write(clamp(original + glow * intensity * 1.5, 0.0, 1.0), gid);
 }
 
-// ─── Vignette ───────────────────────────────────────────────────────────────
-// Smooth circular darkening towards the screen edges.
 kernel void fx_vignette(
-    texture2d<float, access::read>  inTex  [[texture(0)]],
-    texture2d<float, access::write> outTex [[texture(1)]],
+    texture2d<float, access::read>  inTex     [[texture(0)]],
+    texture2d<float, access::write> outTex    [[texture(1)]],
     constant float&                 intensity [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
@@ -103,20 +81,16 @@ kernel void fx_vignette(
     if (gid.x >= w || gid.y >= h) return;
 
     float4 c  = inTex.read(gid);
-    float2 uv = float2(gid) / float2(w, h) - 0.5;   // [-0.5, 0.5]
-    // Correct for aspect ratio so the vignette is circular
+    float2 uv = float2(gid) / float2(w, h) - 0.5;
     uv.x *= float(w) / float(h);
-    float d = length(uv);
-    float v = 1.0 - smoothstep(0.25, 0.75, d * intensity * 2.2);
+    float v = 1.0 - smoothstep(0.25, 0.75, length(uv) * intensity * 2.2);
     c.rgb *= v;
     outTex.write(c, gid);
 }
 
-// ─── Contrast ───────────────────────────────────────────────────────────────
-// S-curve contrast: lifts or crushes mid-tones.
 kernel void fx_contrast(
-    texture2d<float, access::read>  inTex  [[texture(0)]],
-    texture2d<float, access::write> outTex [[texture(1)]],
+    texture2d<float, access::read>  inTex     [[texture(0)]],
+    texture2d<float, access::write> outTex    [[texture(1)]],
     constant float&                 intensity [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
@@ -124,24 +98,19 @@ kernel void fx_contrast(
     if (gid.x >= w || gid.y >= h) return;
 
     float4 c      = inTex.read(gid);
-    float  amount = (intensity - 0.5) * 2.0;          // -1 … +1
-    // Apply a simple S-curve: f(x) = x + amount*(x - x²*(3-2x)) - amount*0.5
-    // Derived from smoothstep, keeps endpoints fixed at 0 and 1.
-    float3 s = c.rgb;
-    float3 curve = s * s * (3.0 - 2.0 * s);           // smoothstep(0,1,x)
+    float  amount = (intensity - 0.5) * 2.0;
+    float3 s      = c.rgb;
+    float3 curve  = s * s * (3.0 - 2.0 * s);
     c.rgb = mix(s, curve, amount);
     outTex.write(clamp(c, 0.0, 1.0), gid);
 }
 
-// ─── Display (vertex + fragment) ─────────────────────────────────────────────
-// Full-screen triangle that copies the processed texture to the CAMetalLayer drawable.
 struct DisplayVert {
     float4 pos [[position]];
     float2 uv;
 };
 
 vertex DisplayVert displayVertex(uint vid [[vertex_id]]) {
-    // One big triangle that covers [-1,3] — the GPU clips it to [-1,1].
     float4 positions[3] = { float4(-1,-1,0,1), float4(3,-1,0,1), float4(-1,3,0,1) };
     float2 uvs[3]       = { float2(0,1),       float2(2,1),      float2(0,-1)     };
     DisplayVert out;
@@ -150,10 +119,7 @@ vertex DisplayVert displayVertex(uint vid [[vertex_id]]) {
     return out;
 }
 
-fragment float4 displayFragment(
-    DisplayVert             in  [[stage_in]],
-    texture2d<float>        tex [[texture(0)]]
-) {
+fragment float4 displayFragment(DisplayVert in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::nearest, address::clamp_to_edge);
     return tex.sample(s, in.uv);
 }

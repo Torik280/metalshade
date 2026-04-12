@@ -8,8 +8,6 @@ let package = Package(
         .executableTarget(
             name: "MetalShade",
             path: "Sources/MetalShade",
-            // System frameworks are auto-linked on import, but listing them
-            // here makes SPM resolution explicit and avoids edge-case linker issues.
             linkerSettings: [
                 .linkedFramework("ScreenCaptureKit"),
                 .linkedFramework("Metal"),

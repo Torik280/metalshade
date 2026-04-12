@@ -1,0 +1,8 @@
+.claude/
+.build/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+MetalShade.app/
+*.o
+*.d

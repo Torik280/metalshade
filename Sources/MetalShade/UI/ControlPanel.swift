@@ -1,7 +1,5 @@
 import SwiftUI
 
-// MARK: - Main control panel view
-
 struct ControlPanel: View {
     @ObservedObject var manager: ShaderManager
 
@@ -21,17 +19,11 @@ struct ControlPanel: View {
         .background(.ultraThinMaterial)
         .background(Neon.bg)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Neon.border, lineWidth: 1)
-        )
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Neon.border, lineWidth: 1))
     }
-
-    // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 8) {
-            // Animated status dot
             Circle()
                 .fill(manager.isEnabled ? Neon.green : Color.white.opacity(0.2))
                 .frame(width: 6, height: 6)
@@ -43,10 +35,7 @@ struct ControlPanel: View {
 
             Spacer()
 
-            // Quit button
-            Button {
-                NSApp.terminate(nil)
-            } label: {
+            Button { NSApp.terminate(nil) } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(Neon.dim)
@@ -59,8 +48,6 @@ struct ControlPanel: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
-
-    // MARK: - Master toggle
 
     private var masterToggle: some View {
         HStack {
@@ -83,8 +70,6 @@ struct ControlPanel: View {
         .padding(.top, 8)
     }
 
-    // MARK: - Effects list
-
     private var effectsList: some View {
         VStack(spacing: 4) {
             ForEach(manager.effects) { effect in
@@ -99,16 +84,12 @@ struct ControlPanel: View {
     }
 }
 
-// MARK: - Single effect row
-
 struct EffectRow: View {
     @ObservedObject var effect: ShaderEffect
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header row: name + toggle
             HStack {
-                // Status indicator
                 RoundedRectangle(cornerRadius: 2)
                     .fill(effect.isEnabled ? Neon.cyan : Color.white.opacity(0.15))
                     .frame(width: 3, height: 24)
@@ -129,7 +110,6 @@ struct EffectRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
 
-            // Intensity slider — shown only when enabled
             if effect.isEnabled {
                 HStack(spacing: 8) {
                     Text("INTENSITY")
@@ -157,7 +137,6 @@ struct EffectRow: View {
     }
 }
 
-// MARK: - Preview (requires Xcode canvas)
 #Preview {
     ControlPanel(manager: ShaderManager())
         .frame(width: 270, height: 460)

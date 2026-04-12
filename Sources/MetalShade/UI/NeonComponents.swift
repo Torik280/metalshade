@@ -1,19 +1,14 @@
 import SwiftUI
 
-// MARK: - Design tokens
-
 enum Neon {
-    static let cyan   = Color(red: 0.00, green: 0.95, blue: 1.00)
-    static let purple = Color(red: 0.65, green: 0.10, blue: 1.00)
-    static let green  = Color(red: 0.15, green: 1.00, blue: 0.55)
-
-    static let bg     = Color.black.opacity(0.82)
+    static let cyan    = Color(red: 0.00, green: 0.95, blue: 1.00)
+    static let purple  = Color(red: 0.65, green: 0.10, blue: 1.00)
+    static let green   = Color(red: 0.15, green: 1.00, blue: 0.55)
+    static let bg      = Color.black.opacity(0.82)
     static let surface = Color.white.opacity(0.04)
     static let border  = Color.white.opacity(0.08)
     static let dim     = Color.white.opacity(0.35)
 }
-
-// MARK: - NeonToggle
 
 struct NeonToggle: View {
     @Binding var isOn: Bool
@@ -43,8 +38,6 @@ struct NeonToggle: View {
     }
 }
 
-// MARK: - NeonSlider
-
 struct NeonSlider: View {
     @Binding var value: Float
     var color: Color = Neon.cyan
@@ -52,24 +45,15 @@ struct NeonSlider: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                // Track
                 Capsule()
                     .fill(Color.white.opacity(0.07))
                     .frame(height: 3)
 
-                // Fill
                 Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.6), color],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .fill(LinearGradient(colors: [color.opacity(0.6), color], startPoint: .leading, endPoint: .trailing))
                     .frame(width: geo.size.width * CGFloat(value), height: 3)
                     .shadow(color: color.opacity(0.5), radius: 3)
 
-                // Thumb
                 Circle()
                     .fill(color)
                     .frame(width: 10, height: 10)
@@ -81,16 +65,13 @@ struct NeonSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
-                        let newVal = Float(drag.location.x / geo.size.width)
-                        value = max(0, min(1, newVal))
+                        value = max(0, min(1, Float(drag.location.x / geo.size.width)))
                     }
             )
         }
         .frame(height: 16)
     }
 }
-
-// MARK: - GlowText
 
 struct GlowText: View {
     let text: String
@@ -106,8 +87,6 @@ struct GlowText: View {
             .shadow(color: color.opacity(0.4), radius: 12)
     }
 }
-
-// MARK: - SectionHeader
 
 struct SectionHeader: View {
     let title: String
