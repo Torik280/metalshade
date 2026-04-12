@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>MetalShade</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.metalshade.app</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <!-- Required for ScreenCaptureKit -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>MetalShade captures the screen to apply real-time post-processing shaders.</string>
+    <!-- Allow running without App Sandbox for development -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+</dict>
+</plist>

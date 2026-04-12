@@ -1,0 +1,49 @@
+# xcodegen project spec — generates a ready-to-use .xcodeproj
+# Install xcodegen: brew install xcodegen
+# Then run:         xcodegen generate
+
+name: MetalShade
+
+options:
+  bundleIdPrefix: com.metalshade
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "15"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  MetalShade:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+
+    sources:
+      - path: Sources/MetalShade
+        excludes:
+          - "**/*.plist"   # handled separately via INFOPLIST_FILE
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.metalshade.app
+        PRODUCT_NAME: MetalShade
+        INFOPLIST_FILE: Sources/MetalShade/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MetalShade.entitlements
+        CODE_SIGN_STYLE: Automatic
+        # Metal shading language version
+        MTL_LANGUAGE_REVISION: Metal30
+        # Fastest + smallest optimisation for release
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        GCC_OPTIMIZATION_LEVEL: "s"
+
+    dependencies:
+      - sdk: ScreenCaptureKit.framework
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
