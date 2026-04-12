@@ -40,7 +40,7 @@ final class CaptureEngine: NSObject {
                 let bounds = info[kCGWindowBounds      as String]
             else { return nil }
 
-            let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) ?? .zero
+            let rect = CGRect(dictionaryRepresentation: bounds as! CFDictionary)
             // Skip tiny system UI elements
             guard rect.width > 100 && rect.height > 100 else { return nil }
 
@@ -80,7 +80,7 @@ final class CaptureEngine: NSObject {
                   let scApp = content.applications.first(where: { $0.processID == windowInfo.pid }) {
             // Fallback: capture the app's portion of the display
             filter        = SCContentFilter(display: display,
-                                            includingApplications: [scApp],
+                                            including: [scApp],
                                             exceptingWindows: [])
             captureWidth  = Int(windowInfo.frame.width)
             captureHeight = Int(windowInfo.frame.height)

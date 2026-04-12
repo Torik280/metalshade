@@ -172,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if self.shaderManager.isEnabled { self.overlayWindow?.orderFront(nil) }
 
                 self.trackingTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-                    DispatchQueue.main.async { self?.updateOverlayPosition() }
+                    self?.updateOverlayPosition()
                 }
             } catch {
                 self.showError(error.localizedDescription)

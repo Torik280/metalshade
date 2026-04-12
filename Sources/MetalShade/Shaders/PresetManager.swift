@@ -1,26 +1,23 @@
 import Foundation
 
 /// Reads and writes ReShade-compatible preset .ini files.
-///
-/// Format:
-///   Techniques=ShaderA,ShaderB
-///
-///   [ShaderA.fx]
-///   param1=0.500000
-///   param2=1.000000
-///
-///   [ShaderB.fx]
-///   intensity=0.300000
+/// Handles both old format (Techniques=Name) and new format (Techniques=Name@File.fx).
 struct PresetManager {
 
-    // MARK: - Load
+    // MARK: - Types
+
+    struct EnabledTechnique {
+        let name:     String   // e.g. "AdaptiveSharpen"
+        let fileName: String   // e.g. "AdaptiveSharpen.fx"
+    }
 
     struct LoadedPreset {
-        /// Names of enabled techniques (as they appear after "Techniques=")
-        let enabledTechniques: [String]
-        /// Map from section name (e.g. "LumaSharpen.fx") → (paramName → value)
+        let techniques: [EnabledTechnique]
+        /// Map from .fx filename → (paramName → value), single-value floats only
         let params: [String: [String: Float]]
     }
+
+    // MARK: - Load
 
     static func load(from url: URL) -> (preset: LoadedPreset?, error: String?) {
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
@@ -30,43 +27,53 @@ struct PresetManager {
     }
 
     private static func parse(_ text: String) -> LoadedPreset {
-        var enabledTechniques: [String]         = []
-        var params:            [String: [String: Float]] = [:]
-        var currentSection:    String?           = nil
+        var techniques:     [EnabledTechnique]          = []
+        var params:         [String: [String: Float]]   = [:]
+        var currentSection: String?                     = nil
 
         for rawLine in text.components(separatedBy: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix(";") || line.hasPrefix("#") { continue }
+            guard !line.isEmpty, !line.hasPrefix(";"), !line.hasPrefix("#") else { continue }
 
-            // Section header [Name]
+            // Section header [FileName.fx]
             if line.hasPrefix("[") && line.hasSuffix("]") {
                 currentSection = String(line.dropFirst().dropLast())
                 continue
             }
 
-            // Key=Value
             guard let eqIdx = line.firstIndex(of: "=") else { continue }
-            let key   = String(line[line.startIndex..<eqIdx]).trimmingCharacters(in: .whitespaces)
+            let key   = String(line[..<eqIdx]).trimmingCharacters(in: .whitespaces)
             let value = String(line[line.index(after: eqIdx)...]).trimmingCharacters(in: .whitespaces)
 
             if currentSection == nil {
-                // Global section
-                if key == "Techniques" || key == "TechniquesAlreadyOrdered" {
-                    if key == "Techniques" {
-                        enabledTechniques = value
-                            .components(separatedBy: ",")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty }
-                    }
+                // Global keys
+                if key == "Techniques" {
+                    // Format: "TechniqueName@FileName.fx,..." or just "TechniqueName,..."
+                    techniques = value
+                        .components(separatedBy: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                        .map { entry -> EnabledTechnique in
+                            if let atIdx = entry.firstIndex(of: "@") {
+                                let name     = String(entry[..<atIdx])
+                                let fileName = String(entry[entry.index(after: atIdx)...])
+                                return EnabledTechnique(name: name, fileName: fileName)
+                            }
+                            // Old format without @
+                            let fileName = entry.hasSuffix(".fx") ? entry : entry + ".fx"
+                            return EnabledTechnique(name: entry, fileName: fileName)
+                        }
                 }
             } else if let section = currentSection {
+                // Skip multi-value entries like "FogColor=0.5,0.5,0.5"
+                guard !value.contains(",") else { continue }
                 if let floatVal = Float(value) {
                     params[section, default: [:]][key] = floatVal
                 }
             }
         }
 
-        return LoadedPreset(enabledTechniques: enabledTechniques, params: params)
+        return LoadedPreset(techniques: techniques, params: params)
     }
 
     // MARK: - Save
@@ -74,25 +81,21 @@ struct PresetManager {
     static func save(effects: [ShaderEffect], to url: URL) -> String? {
         var lines: [String] = []
 
-        // Techniques line
-        let enabled = effects.filter { $0.isEnabled }.map { $0.name }
-        lines.append("Techniques=\(enabled.joined(separator: ","))")
-        lines.append("TechniquesAlreadyOrdered=\(enabled.joined(separator: ","))")
+        let enabledEntries = effects.filter { $0.isEnabled }
+            .map { "\($0.name)@\($0.name).fx" }
+        lines.append("Techniques=\(enabledEntries.joined(separator: ","))")
         lines.append("")
 
-        // Per-effect sections
         for effect in effects {
-            let sectionName = effect.isCustom ? "\(effect.name).fx" : "\(effect.name).fx"
-            lines.append("[\(sectionName)]")
+            lines.append("[\(effect.name).fx]")
             for param in effect.params {
                 lines.append("\(param.name)=\(String(format: "%.6f", param.value))")
             }
             lines.append("")
         }
 
-        let content = lines.joined(separator: "\n")
         do {
-            try content.write(to: url, atomically: true, encoding: .utf8)
+            try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
             return nil
         } catch {
             return "Ошибка сохранения: \(error.localizedDescription)"

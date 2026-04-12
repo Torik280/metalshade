@@ -80,54 +80,102 @@ final class ShaderManager: ObservableObject {
     /// Apply a loaded preset. Returns human-readable summary of what was applied.
     @discardableResult
     func applyPreset(_ preset: PresetManager.LoadedPreset) -> String {
-        var matched: [String]   = []
+        var matched:   [String] = []
         var unmatched: [String] = []
 
         for effect in effects {
-            // Enable if the technique name fuzzy-matches (e.g. "LumaSharpen" → "Sharpen")
-            let inTechniques = preset.enabledTechniques.contains(where: {
-                fuzzyMatch(technique: $0, effect: effect)
+            // Match against both technique name AND .fx filename
+            let matchedTech = preset.techniques.first(where: {
+                fuzzyMatch($0.name, effect: effect) || fuzzyMatch($0.fileName, effect: effect)
             })
-            effect.isEnabled = inTechniques
+            effect.isEnabled = matchedTech != nil
 
-            // Find matching .fx section in params
-            let sectionKey = preset.params.keys.first(where: {
-                fuzzyMatch(technique: $0.replacingOccurrences(of: ".fx", with: ""), effect: effect)
-            })
+            // Find the params section: prefer the matched filename, then fuzzy search
+            let sectionKey: String?
+            if let fileName = matchedTech?.fileName, preset.params[fileName] != nil {
+                sectionKey = fileName
+            } else {
+                sectionKey = preset.params.keys.first(where: {
+                    fuzzyMatch($0.replacingOccurrences(of: ".fx", with: ""), effect: effect)
+                })
+            }
+
             if let key = sectionKey, let sectionParams = preset.params[key] {
-                for param in effect.params {
-                    if let val = sectionParams[param.name] {
-                        param.value = min(param.max, max(param.min, val))
-                    } else if let entry = sectionParams.first(where: {
-                        $0.key.caseInsensitiveCompare(param.name) == .orderedSame
-                    }) {
-                        param.value = min(param.max, max(param.min, entry.value))
-                    }
-                }
-                if inTechniques { matched.append(effect.name) }
+                applyParams(sectionParams, to: effect)
+                if effect.isEnabled { matched.append(effect.name) }
             }
         }
 
-        // Collect preset techniques that didn't match any loaded effect
-        for tech in preset.enabledTechniques {
-            let hasMatch = effects.contains(where: { fuzzyMatch(technique: tech, effect: $0) })
-            if !hasMatch { unmatched.append(tech) }
+        // Report techniques that have no matching built-in effect
+        for tech in preset.techniques {
+            let hasMatch = effects.contains(where: {
+                fuzzyMatch(tech.name, effect: $0) || fuzzyMatch(tech.fileName, effect: $0)
+            })
+            if !hasMatch { unmatched.append(tech.name) }
         }
 
-        var summary = matched.isEmpty
-            ? "Ни один эффект не совпал с пресетом."
-            : "Включено: \(matched.joined(separator: ", "))."
+        var summary: String
+        if matched.isEmpty {
+            summary = "Ни один встроенный эффект не совпал.\nЗагрузи нужные .fx файлы через «Загрузить .fx»."
+        } else {
+            summary = "Включено: \(matched.joined(separator: ", "))"
+        }
         if !unmatched.isEmpty {
-            summary += "\n\nНе найдено (загрузи .fx файлы):\n" + unmatched.map { "• \($0).fx" }.joined(separator: "\n")
+            let list = unmatched.prefix(6).joined(separator: ", ")
+            let more = unmatched.count > 6 ? " и ещё \(unmatched.count - 6)..." : ""
+            summary += "\n\nНужны .fx файлы: \(list)\(more)"
         }
         return summary
     }
 
-    private func fuzzyMatch(technique: String, effect: ShaderEffect) -> Bool {
-        let t = technique.lowercased()
+    /// Try to set effect param values from the section params dict.
+    /// Falls back to intensity-like key names, then to the first single float in the section.
+    private func applyParams(_ sectionParams: [String: Float], to effect: ShaderEffect) {
+        // Common ReShade intensity-like parameter names, in priority order
+        let intensityKeys = [
+            "intensity", "strength", "amount", "power", "blend", "opacity",
+            "curve_height", "sharp_strength", "lumasharpen_strength",
+            "vibrance", "colourfulness", "bloom_strength", "bloomstrength"
+        ]
+
+        for param in effect.params {
+            let nameLC = param.name.lowercased()
+
+            // 1. Exact match
+            if let val = sectionParams.first(where: { $0.key.lowercased() == nameLC })?.value {
+                param.value = min(param.max, max(param.min, val))
+                continue
+            }
+
+            // 2. Try common intensity key names that contain or match the param name
+            if let val = intensityKeys.lazy
+                .compactMap({ sectionParams[$0] ?? sectionParams[$0.capitalized] })
+                .first {
+                param.value = min(param.max, max(param.min, val))
+                continue
+            }
+
+            // 3. Any key that contains param name or vice versa
+            if let entry = sectionParams.first(where: {
+                let k = $0.key.lowercased()
+                return k.contains(nameLC) || nameLC.contains(k)
+            }) {
+                param.value = min(param.max, max(param.min, entry.value))
+                continue
+            }
+
+            // 4. Last resort: first float value in the section (clamped 0…1)
+            if let first = sectionParams.values.first {
+                let clamped = min(1, max(0, first))
+                param.value = param.min + clamped * (param.max - param.min)
+            }
+        }
+    }
+
+    private func fuzzyMatch(_ technique: String, effect: ShaderEffect) -> Bool {
+        let t = technique.lowercased().replacingOccurrences(of: ".fx", with: "")
         let n = effect.name.lowercased()
         let f = effect.functionName.lowercased().replacingOccurrences(of: "fx_", with: "")
-        // Exact or contains match in either direction
         return t == n || t == f
             || t.contains(n) || n.contains(t)
             || t.contains(f) || f.contains(t)
