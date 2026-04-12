@@ -16,85 +16,65 @@ final class CaptureEngine: NSObject {
         }
     }
 
-    // MARK: - Window enumeration (CGWindowList — reliable across all macOS versions)
+    // MARK: - App enumeration (NSWorkspace — no permission needed)
 
-    struct WindowInfo {
-        let windowID: CGWindowID
-        let title:    String
-        let appName:  String
+    struct AppInfo {
+        let name:     String
         let pid:      pid_t
-        let frame:    CGRect
+        let bundleID: String?
+        let icon:     NSImage?
     }
 
-    static func availableWindows() -> [WindowInfo] {
-        let opts: CGWindowListOption = [.excludeDesktopElements, .optionOnScreenOnly]
-        guard let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]]
-        else { return [] }
-
-        return list.compactMap { info -> WindowInfo? in
-            guard
-                let wid    = info[kCGWindowNumber      as String] as? CGWindowID,
-                let title  = info[kCGWindowName        as String] as? String, !title.isEmpty,
-                let app    = info[kCGWindowOwnerName   as String] as? String,
-                let pid    = info[kCGWindowOwnerPID    as String] as? pid_t,
-                let bounds = info[kCGWindowBounds      as String]
-            else { return nil }
-
-            guard let rect = CGRect(dictionaryRepresentation: bounds as! CFDictionary),
-                  rect.width > 100, rect.height > 100 else { return nil }
-
-            return WindowInfo(windowID: wid, title: title, appName: app, pid: pid, frame: rect)
-        }
+    /// Returns all regular (visible) running apps. No Screen Recording permission required.
+    static func runningApps() -> [AppInfo] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .map { AppInfo(name: $0.localizedName ?? "Unknown",
+                           pid:  $0.processIdentifier,
+                           bundleID: $0.bundleIdentifier,
+                           icon: $0.icon) }
+            .sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 
-    // Find Star Stable in the window list
-    static func findStarStable() -> WindowInfo? {
+    /// Find Star Stable in the running app list.
+    static func findStarStable() -> AppInfo? {
         let keywords = ["star stable", "starstable", "sso"]
-        return availableWindows().first { w in
-            let n = w.appName.lowercased()
-            let t = w.title.lowercased()
-            return keywords.contains(where: { n.contains($0) || t.contains($0) })
+        return runningApps().first { app in
+            let n = app.name.lowercased()
+            let b = (app.bundleID ?? "").lowercased()
+            return keywords.contains(where: { n.contains($0) || b.contains($0) })
         }
     }
 
-    // MARK: - Start capture for a specific window
+    // MARK: - Capture by app PID
 
-    /// Starts capturing `windowInfo.windowID`. Returns the window frame (CG coords).
-    func start(windowInfo: WindowInfo) async throws -> CGRect {
-        // Try to get the SCWindow by ID; fall back to display-level capture
+    /// Captures everything on the main display that belongs to the given app.
+    /// Returns the display frame (overlay should cover the full screen).
+    func start(appPID: pid_t) async throws -> CGRect {
         let content = try await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: false
         )
-
-        let filter: SCContentFilter
-        let captureWidth:  Int
-        let captureHeight: Int
-
-        if let scWin = content.windows.first(where: { $0.windowID == windowInfo.windowID }) {
-            // Best path: capture only the target window
-            filter        = SCContentFilter(desktopIndependentWindow: scWin)
-            captureWidth  = Int(windowInfo.frame.width)
-            captureHeight = Int(windowInfo.frame.height)
-        } else if let display = content.displays.first,
-                  let scApp = content.applications.first(where: { $0.processID == windowInfo.pid }) {
-            // Fallback: capture the app's portion of the display
-            filter        = SCContentFilter(display: display,
-                                            including: [scApp],
-                                            exceptingWindows: [])
-            captureWidth  = Int(windowInfo.frame.width)
-            captureHeight = Int(windowInfo.frame.height)
-        } else {
-            throw NSError(domain: "CaptureEngine", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey:
-                            "Не удалось найти окно в ScreenCaptureKit. " +
-                            "Попробуй перезапустить игру и MetalShade."])
+        guard let display = content.displays.first else {
+            throw NSError(domain: "CaptureEngine", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Дисплей не найден"])
         }
+        guard let scApp = content.applications.first(where: { $0.processID == appPID }) else {
+            throw NSError(domain: "CaptureEngine", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Приложение не найдено в ScreenCaptureKit.\n" +
+                            "Убедись что в Системных настройках → Конфиденциальность → " +
+                            "Запись экрана разрешено MetalShade, затем перезапусти MetalShade."])
+        }
+
+        let filter = SCContentFilter(display: display,
+                                     including: [scApp],
+                                     exceptingWindows: [])
 
         let config = SCStreamConfiguration()
         config.pixelFormat          = kCVPixelFormatType_32BGRA
         config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        config.width                = captureWidth
-        config.height               = captureHeight
+        config.width                = display.width
+        config.height               = display.height
         config.capturesAudio        = false
         if #available(macOS 14.0, *) { config.shouldBeOpaque = true }
         config.colorSpaceName       = CGColorSpace.sRGB
@@ -104,7 +84,8 @@ final class CaptureEngine: NSObject {
                                     sampleHandlerQueue: .global(qos: .userInteractive))
         try await stream?.startCapture()
 
-        return windowInfo.frame
+        // Return full display frame in CG coordinates
+        return CGRect(x: 0, y: 0, width: display.width, height: display.height)
     }
 
     func stop() async {

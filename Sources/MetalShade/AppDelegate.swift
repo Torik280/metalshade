@@ -15,8 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var renderer:      MetalRenderer?
     private var cancellables   = Set<AnyCancellable>()
 
-    private var trackingTimer:   Timer?
-    private var currentWindowID: CGWindowID?
+    private var currentAppPID: pid_t?
 
     // MARK: - Launch
 
@@ -33,8 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Auto-connect to Star Stable if already running
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let ssWindow = CaptureEngine.findStarStable() {
-                self.selectWindow(ssWindow)
+            if let ssApp = CaptureEngine.findStarStable() {
+                self.selectApp(ssApp)
             }
         }
     }
@@ -94,44 +93,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
     }
 
-    // MARK: - Window picker (CGWindowList — no SCKit needed for enumeration)
+    // MARK: - App picker (NSWorkspace — no Screen Recording permission needed)
 
     private func showWindowPicker() {
-        let windows = CaptureEngine.availableWindows()
+        let apps = CaptureEngine.runningApps()
 
-        guard !windows.isEmpty else {
-            let alert = NSAlert()
-            alert.messageText     = "Нет доступных окон"
-            alert.informativeText = "Убедись что разрешена «Запись экрана» для MetalShade:\nСистемные настройки → Конфиденциальность → Запись экрана\n\nЗатем запусти Star Stable и нажми «Выбрать» снова."
-            alert.alertStyle      = .warning
-            alert.addButton(withTitle: "Открыть настройки")
-            alert.addButton(withTitle: "Закрыть")
-            if alert.runModal() == .alertFirstButtonReturn {
-                NSWorkspace.shared.open(
-                    URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
-                )
-            }
-            return
+        guard !apps.isEmpty else {
+            showError("Нет запущенных приложений."); return
         }
 
-        let menu = NSMenu(title: "Выбрать окно")
+        let menu = NSMenu(title: "Выбрать приложение")
 
-        // Star Stable first
-        let sorted = windows.sorted { a, _ in
-            let n = a.appName.lowercased()
-            return n.contains("star stable") || n.contains("starstable")
+        // Star Stable pinned to top
+        let sorted = apps.sorted { a, _ in
+            a.name.lowercased().contains("star stable") || a.name.lowercased().contains("starstable")
         }
 
-        for w in sorted {
-            var label = "\(w.appName) — \(w.title)"
-            if w.appName.lowercased().contains("star stable") || w.appName.lowercased().contains("starstable") {
+        for app in sorted {
+            var label = app.name
+            if app.name.lowercased().contains("star stable") || app.name.lowercased().contains("starstable") {
                 label = "⭐ " + label
             }
             let item = NSMenuItem(title: label,
-                                  action: #selector(windowMenuItemSelected(_:)),
+                                  action: #selector(appMenuItemSelected(_:)),
                                   keyEquivalent: "")
             item.target            = self
-            item.representedObject = w as AnyObject
+            item.representedObject = app as AnyObject
             menu.addItem(item)
         }
 
@@ -141,22 +128,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func windowMenuItemSelected(_ sender: NSMenuItem) {
-        guard let w = sender.representedObject as? CaptureEngine.WindowInfo else { return }
-        selectWindow(w)
+    @objc private func appMenuItemSelected(_ sender: NSMenuItem) {
+        guard let app = sender.representedObject as? CaptureEngine.AppInfo else { return }
+        selectApp(app)
     }
 
-    private func selectWindow(_ info: CaptureEngine.WindowInfo) {
-        let label = "\(info.appName) — \(info.title)"
-        DispatchQueue.main.async { self.shaderManager.targetWindowTitle = label }
+    private func selectApp(_ app: CaptureEngine.AppInfo) {
+        shaderManager.targetWindowTitle = app.name
 
-        trackingTimer?.invalidate()
-        trackingTimer = nil
         let old = captureEngine
         captureEngine = nil
         Task { await old?.stop() }
 
-        currentWindowID = info.windowID
+        currentAppPID = app.pid
 
         let engine = CaptureEngine()
         engine.onFrame = { [weak self] pixelBuffer in
@@ -167,26 +151,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             do {
-                let frame = try await engine.start(windowInfo: info)
+                let frame = try await engine.start(appPID: app.pid)
                 guard let screen = NSScreen.main else { return }
+                // Overlay covers the full display (app content fills it via SCKit filter)
                 self.overlayWindow?.matchWindow(cgFrame: frame, on: screen)
                 if self.shaderManager.isEnabled { self.overlayWindow?.orderFront(nil) }
-
-                self.trackingTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-                    self?.updateOverlayPosition()
-                }
             } catch {
                 self.showError(error.localizedDescription)
             }
         }
-    }
-
-    private func updateOverlayPosition() {
-        guard let windowID = currentWindowID,
-              let win = CaptureEngine.availableWindows().first(where: { $0.windowID == windowID }),
-              let screen = NSScreen.main
-        else { return }
-        overlayWindow?.matchWindow(cgFrame: win.frame, on: screen)
     }
 
     // MARK: - Shader file picker

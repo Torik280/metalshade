@@ -73,7 +73,7 @@ struct ControlPanel: View {
                         Text("Подключить Star Stable")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.white)
-                        Text("Нажми, затем выбери окно игры")
+                        Text("Нажми, затем выбери приложение")
                             .font(.system(size: 9))
                             .foregroundColor(Neon.dim)
                     }
