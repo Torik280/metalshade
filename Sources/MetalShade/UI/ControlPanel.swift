@@ -9,9 +9,12 @@ struct ControlPanel: View {
             Divider().background(Neon.border).padding(.horizontal, 8)
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 0) {
+                    windowRow
                     masterToggle
                     SectionHeader(title: "EFFECTS")
                     effectsList
+                    SectionHeader(title: "SHADERS")
+                    loadShaderButton
                 }
                 .padding(.bottom, 16)
             }
@@ -21,6 +24,8 @@ struct ControlPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Neon.border, lineWidth: 1))
     }
+
+    // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 8) {
@@ -49,6 +54,46 @@ struct ControlPanel: View {
         .padding(.vertical, 12)
     }
 
+    // MARK: - Window picker row
+
+    private var windowRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "macwindow")
+                .font(.system(size: 10))
+                .foregroundColor(Neon.dim)
+
+            Text(manager.targetWindowTitle)
+                .font(.system(size: 10))
+                .foregroundColor(manager.targetWindowTitle == "Не выбрано" ? Neon.dim : .white)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer()
+
+            Button {
+                manager.onPickWindow?()
+            } label: {
+                Text("Выбрать")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Neon.cyan)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Neon.cyan.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Neon.cyan.opacity(0.3), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Neon.surface)
+        .cornerRadius(10)
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+    }
+
+    // MARK: - Master toggle
+
     private var masterToggle: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
@@ -70,6 +115,8 @@ struct ControlPanel: View {
         .padding(.top, 8)
     }
 
+    // MARK: - Effects list
+
     private var effectsList: some View {
         VStack(spacing: 4) {
             ForEach(manager.effects) { effect in
@@ -82,7 +129,33 @@ struct ControlPanel: View {
         .animation(.easeInOut(duration: 0.2), value: manager.isEnabled)
         .allowsHitTesting(manager.isEnabled)
     }
+
+    // MARK: - Load shader button
+
+    private var loadShaderButton: some View {
+        Button {
+            manager.onLoadShader?()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 11))
+                Text("Загрузить .fx / .metal")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+            }
+            .foregroundColor(Neon.cyan)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(Neon.cyan.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Neon.cyan.opacity(0.25), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
+    }
 }
+
+// MARK: - Effect row (supports multiple params)
 
 struct EffectRow: View {
     @ObservedObject var effect: ShaderEffect
@@ -96,9 +169,20 @@ struct EffectRow: View {
                     .shadow(color: effect.isEnabled ? Neon.cyan.opacity(0.7) : .clear, radius: 3)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(effect.name)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(effect.isEnabled ? .white : Neon.dim)
+                    HStack(spacing: 4) {
+                        Text(effect.name)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(effect.isEnabled ? .white : Neon.dim)
+                        if effect.isCustom {
+                            Text("FX")
+                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .foregroundColor(Neon.cyan)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Neon.cyan.opacity(0.15))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                    }
                     Text(effect.description)
                         .font(.system(size: 9))
                         .foregroundColor(Neon.dim)
@@ -111,16 +195,10 @@ struct EffectRow: View {
             .padding(.vertical, 8)
 
             if effect.isEnabled {
-                HStack(spacing: 8) {
-                    Text("INTENSITY")
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                        .foregroundColor(Neon.dim)
-                        .kerning(1)
-                    NeonSlider(value: $effect.intensity)
-                    Text(String(format: "%.2f", effect.intensity))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(Neon.cyan)
-                        .frame(width: 30, alignment: .trailing)
+                VStack(spacing: 6) {
+                    ForEach(effect.params) { param in
+                        ParamRow(param: param)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.bottom, 10)
@@ -137,7 +215,37 @@ struct EffectRow: View {
     }
 }
 
+struct ParamRow: View {
+    @ObservedObject var param: ShaderParam
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(param.label.uppercased())
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundColor(Neon.dim)
+                .kerning(1)
+                .lineLimit(1)
+                .frame(width: 60, alignment: .leading)
+
+            NeonSlider(value: Binding(
+                get: {
+                    guard param.max > param.min else { return 0 }
+                    return (param.value - param.min) / (param.max - param.min)
+                },
+                set: { newNorm in
+                    param.value = param.min + newNorm * (param.max - param.min)
+                }
+            ))
+
+            Text(String(format: "%.2f", param.value))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(Neon.cyan)
+                .frame(width: 34, alignment: .trailing)
+        }
+    }
+}
+
 #Preview {
     ControlPanel(manager: ShaderManager())
-        .frame(width: 270, height: 460)
+        .frame(width: 270, height: 520)
 }

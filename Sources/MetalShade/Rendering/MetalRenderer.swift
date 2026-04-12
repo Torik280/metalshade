@@ -6,7 +6,7 @@ final class MetalRenderer {
 
     private let device:       MTLDevice
     private let commandQueue: MTLCommandQueue
-    private var library:      MTLLibrary?
+    private var builtinLib:   MTLLibrary?
 
     private var computePipelines: [String: MTLComputePipelineState] = [:]
     private var displayPipeline:  MTLRenderPipelineState?
@@ -29,23 +29,30 @@ final class MetalRenderer {
         self.overlay       = overlay
         self.shaderManager = shaderManager
 
-        buildLibrary()
+        buildBuiltinLibrary()
         buildDisplayPipeline()
+
+        // Hook for ShaderManager to add custom pipelines
+        shaderManager.onAddPipeline = { [weak self] source, name in
+            self?.addCustomPipeline(source: source, functionName: name) ?? false
+        }
     }
 
-    private func buildLibrary() {
+    // MARK: - Pipeline building
+
+    private func buildBuiltinLibrary() {
         let options = MTLCompileOptions()
         options.fastMathEnabled = true
         do {
-            library = try device.makeLibrary(source: builtinShaderSource, options: options)
+            builtinLib = try device.makeLibrary(source: builtinShaderSource, options: options)
         } catch {
-            print("Shader compile error: \(error)")
+            print("Builtin shader compile error: \(error)")
         }
     }
 
     private func buildComputePipeline(named name: String) -> MTLComputePipelineState? {
         if let cached = computePipelines[name] { return cached }
-        guard let lib = library, let fn = lib.makeFunction(name: name) else { return nil }
+        guard let fn = builtinLib?.makeFunction(name: name) else { return nil }
         do {
             let ps = try device.makeComputePipelineState(function: fn)
             computePipelines[name] = ps
@@ -56,12 +63,31 @@ final class MetalRenderer {
         }
     }
 
+    /// Compile a custom MSL source string and cache the pipeline.
+    func addCustomPipeline(source: String, functionName: String) -> Bool {
+        let options = MTLCompileOptions()
+        options.fastMathEnabled = true
+        do {
+            let lib = try device.makeLibrary(source: source, options: options)
+            guard let fn = lib.makeFunction(name: functionName) else {
+                print("Function '\(functionName)' not found in custom shader")
+                return false
+            }
+            let ps = try device.makeComputePipelineState(function: fn)
+            computePipelines[functionName] = ps
+            return true
+        } catch {
+            print("Custom pipeline '\(functionName)' compile error: \(error)")
+            return false
+        }
+    }
+
     private func buildDisplayPipeline() {
-        guard let lib = library else { return }
+        guard let lib = builtinLib else { return }
         let desc = MTLRenderPipelineDescriptor()
         desc.vertexFunction   = lib.makeFunction(name: "displayVertex")
         desc.fragmentFunction = lib.makeFunction(name: "displayFragment")
-        desc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        desc.colorAttachments[0].pixelFormat        = .bgra8Unorm
         desc.colorAttachments[0]!.isBlendingEnabled = false
         do {
             displayPipeline = try device.makeRenderPipelineState(descriptor: desc)
@@ -69,6 +95,8 @@ final class MetalRenderer {
             print("Display pipeline error: \(error)")
         }
     }
+
+    // MARK: - Render
 
     func process(pixelBuffer: CVPixelBuffer) {
         guard
@@ -97,25 +125,38 @@ final class MetalRenderer {
         var src: MTLTexture = inputTex
         var dst: MTLTexture = ping
 
-        for effect in activeEffects {
-            guard let pipeline = buildComputePipeline(named: effect.functionName) else { continue }
+        if activeEffects.isEmpty {
+            // No effects active — just pass through the captured frame
+            src = inputTex
+        } else {
+            for effect in activeEffects {
+                guard let pipeline = buildComputePipeline(named: effect.functionName) else { continue }
 
-            let encoder = commandBuffer.makeComputeCommandEncoder()!
-            encoder.setComputePipelineState(pipeline)
-            encoder.setTexture(src, index: 0)
-            encoder.setTexture(dst, index: 1)
-            var intensity = effect.intensity
-            encoder.setBytes(&intensity, length: MemoryLayout<Float>.size, index: 0)
+                let encoder = commandBuffer.makeComputeCommandEncoder()!
+                encoder.setComputePipelineState(pipeline)
+                encoder.setTexture(src, index: 0)
+                encoder.setTexture(dst, index: 1)
+                // Pass each param in its own buffer slot (slot 0 = intensity / first param)
+                for (i, param) in effect.params.enumerated() {
+                    var v = param.value
+                    encoder.setBytes(&v, length: MemoryLayout<Float>.size, index: i)
+                }
 
-            let tgSize  = MTLSize(width: 16, height: 16, depth: 1)
-            let tgCount = MTLSize(width: (inputTex.width + 15) / 16, height: (inputTex.height + 15) / 16, depth: 1)
-            encoder.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
-            encoder.endEncoding()
+                let tgSize  = MTLSize(width: 16, height: 16, depth: 1)
+                let tgCount = MTLSize(
+                    width:  (inputTex.width  + 15) / 16,
+                    height: (inputTex.height + 15) / 16,
+                    depth:  1
+                )
+                encoder.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
+                encoder.endEncoding()
 
-            swap(&src, &dst)
-            dst = (src === ping) ? pong : ping
+                swap(&src, &dst)
+                dst = (src === ping) ? pong : ping
+            }
         }
 
+        // Blit processed texture to the drawable
         let passDesc = MTLRenderPassDescriptor()
         passDesc.colorAttachments[0].texture     = drawable.texture
         passDesc.colorAttachments[0].loadAction  = .clear
@@ -139,8 +180,12 @@ final class MetalRenderer {
         commandBuffer.commit()
     }
 
+    // MARK: - Helpers
+
     private func makeTexture(from surface: IOSurface, width: Int, height: Int) -> MTLTexture? {
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
+        )
         desc.usage       = [.shaderRead]
         desc.storageMode = .shared
         return device.makeTexture(descriptor: desc, iosurface: surface, plane: 0)
@@ -151,7 +196,9 @@ final class MetalRenderer {
         guard newSize.width != lastTextureSize.width || newSize.height != lastTextureSize.height else { return }
         lastTextureSize = newSize
 
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
+        )
         desc.usage       = [.shaderRead, .shaderWrite]
         desc.storageMode = .private
 
