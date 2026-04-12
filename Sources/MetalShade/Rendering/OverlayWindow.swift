@@ -11,8 +11,7 @@ final class OverlayWindow: NSWindow {
             contentRect: screen.frame,
             styleMask:   [.borderless],
             backing:     .buffered,
-            defer:       false,
-            screen:      screen
+            defer:       false
         )
 
         backgroundColor    = .clear

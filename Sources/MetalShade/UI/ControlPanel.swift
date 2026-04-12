@@ -30,7 +30,7 @@ struct ControlPanel: View {
                 .shadow(color: manager.isEnabled ? Neon.green.opacity(0.9) : .clear, radius: 4)
                 .animation(.easeInOut(duration: 0.3), value: manager.isEnabled)
 
-            GlowText("METALSHADE", color: Neon.cyan, size: 12, weight: .bold)
+            GlowText(text: "METALSHADE", color: Neon.cyan, size: 12, weight: .bold)
                 .kerning(3)
 
             Spacer()

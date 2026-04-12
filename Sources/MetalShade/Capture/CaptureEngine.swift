@@ -32,7 +32,9 @@ final class CaptureEngine: NSObject {
             config.width                = display.width
             config.height               = display.height
             config.capturesAudio        = false
-            config.shouldBeOpaque       = true
+            if #available(macOS 14.0, *) {
+                config.shouldBeOpaque   = true
+            }
             config.colorSpaceName       = CGColorSpace.sRGB
 
             stream = SCStream(filter: filter, configuration: config, delegate: self)
