@@ -55,14 +55,17 @@ final class ShaderEffect: ObservableObject, Identifiable {
 }
 
 final class ShaderManager: ObservableObject {
-    @Published var isEnabled:         Bool   = false
-    @Published var targetWindowTitle: String = "Не выбрано"
+    @Published var isEnabled:         Bool    = false
+    @Published var targetWindowTitle: String  = "Не выбрано"
+    @Published var lastPresetName:    String  = ""
+    @Published var lastPresetStatus:  String? = nil  // nil = no preset loaded yet
+    // Defaults tuned for Star Stable Online's art style
     @Published var effects: [ShaderEffect] = [
-        ShaderEffect(name: "Sharpen",  description: "Edge enhancement",            functionName: "fx_sharpen",  intensity: 0.6),
-        ShaderEffect(name: "Vibrance", description: "Intelligent saturation boost", functionName: "fx_vibrance", intensity: 0.5),
-        ShaderEffect(name: "Bloom",    description: "Soft glow on bright areas",    functionName: "fx_bloom",    intensity: 0.4),
-        ShaderEffect(name: "Vignette", description: "Dark edges, cinematic look",   functionName: "fx_vignette", intensity: 0.5),
-        ShaderEffect(name: "Contrast", description: "Lift / crush mid-tones",       functionName: "fx_contrast", intensity: 0.55),
+        ShaderEffect(name: "Sharpen",  description: "Чёткость текстур",        functionName: "fx_sharpen",  intensity: 0.45),
+        ShaderEffect(name: "Vibrance", description: "Насыщенность цветов",      functionName: "fx_vibrance", intensity: 0.35),
+        ShaderEffect(name: "Bloom",    description: "Мягкое свечение",          functionName: "fx_bloom",    intensity: 0.25),
+        ShaderEffect(name: "Vignette", description: "Затемнение краёв",         functionName: "fx_vignette", intensity: 0.30),
+        ShaderEffect(name: "Contrast", description: "Контраст / яркость",       functionName: "fx_contrast", intensity: 0.52),
     ]
 
     var activeEffects: [ShaderEffect] { effects.filter { $0.isEnabled } }
@@ -74,33 +77,60 @@ final class ShaderManager: ObservableObject {
     var onSavePreset:  (() -> Void)?
     var onAddPipeline: ((String, String) -> Bool)?
 
-    /// Apply a loaded preset: enable/disable effects and set param values.
-    /// Effects that are listed in the preset but not yet loaded are silently skipped.
-    func applyPreset(_ preset: PresetManager.LoadedPreset) {
+    /// Apply a loaded preset. Returns human-readable summary of what was applied.
+    @discardableResult
+    func applyPreset(_ preset: PresetManager.LoadedPreset) -> String {
+        var matched: [String]   = []
+        var unmatched: [String] = []
+
         for effect in effects {
-            // Determine enabled state from Techniques list
+            // Enable if the technique name fuzzy-matches (e.g. "LumaSharpen" → "Sharpen")
             let inTechniques = preset.enabledTechniques.contains(where: {
-                $0.caseInsensitiveCompare(effect.name) == .orderedSame ||
-                $0.caseInsensitiveCompare(effect.functionName) == .orderedSame
+                fuzzyMatch(technique: $0, effect: effect)
             })
             effect.isEnabled = inTechniques
 
-            // Find a matching section — try "Name.fx", "functionName.fx", exact name
-            let candidates = ["\(effect.name).fx", "\(effect.functionName).fx", effect.name]
-            guard let section = candidates.first(where: { preset.params[$0] != nil }),
-                  let sectionParams = preset.params[section] else { continue }
-
-            for param in effect.params {
-                // Match by exact name or case-insensitive
-                if let val = sectionParams[param.name] {
-                    param.value = min(param.max, max(param.min, val))
-                } else if let entry = sectionParams.first(where: {
-                    $0.key.caseInsensitiveCompare(param.name) == .orderedSame
-                }) {
-                    param.value = min(param.max, max(param.min, entry.value))
+            // Find matching .fx section in params
+            let sectionKey = preset.params.keys.first(where: {
+                fuzzyMatch(technique: $0.replacingOccurrences(of: ".fx", with: ""), effect: effect)
+            })
+            if let key = sectionKey, let sectionParams = preset.params[key] {
+                for param in effect.params {
+                    if let val = sectionParams[param.name] {
+                        param.value = min(param.max, max(param.min, val))
+                    } else if let entry = sectionParams.first(where: {
+                        $0.key.caseInsensitiveCompare(param.name) == .orderedSame
+                    }) {
+                        param.value = min(param.max, max(param.min, entry.value))
+                    }
                 }
+                if inTechniques { matched.append(effect.name) }
             }
         }
+
+        // Collect preset techniques that didn't match any loaded effect
+        for tech in preset.enabledTechniques {
+            let hasMatch = effects.contains(where: { fuzzyMatch(technique: tech, effect: $0) })
+            if !hasMatch { unmatched.append(tech) }
+        }
+
+        var summary = matched.isEmpty
+            ? "Ни один эффект не совпал с пресетом."
+            : "Включено: \(matched.joined(separator: ", "))."
+        if !unmatched.isEmpty {
+            summary += "\n\nНе найдено (загрузи .fx файлы):\n" + unmatched.map { "• \($0).fx" }.joined(separator: "\n")
+        }
+        return summary
+    }
+
+    private func fuzzyMatch(technique: String, effect: ShaderEffect) -> Bool {
+        let t = technique.lowercased()
+        let n = effect.name.lowercased()
+        let f = effect.functionName.lowercased().replacingOccurrences(of: "fx_", with: "")
+        // Exact or contains match in either direction
+        return t == n || t == f
+            || t.contains(n) || n.contains(t)
+            || t.contains(f) || f.contains(t)
     }
 
     func addCustomShader(name: String, functionName: String,

@@ -9,6 +9,7 @@ struct ControlPanel: View {
             Divider().background(Neon.border).padding(.horizontal, 8)
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 0) {
+                    ssoQuickConnect
                     windowRow
                     masterToggle
                     SectionHeader(title: "EFFECTS")
@@ -16,6 +17,7 @@ struct ControlPanel: View {
                     SectionHeader(title: "SHADERS")
                     loadShaderButton
                     SectionHeader(title: "PRESET")
+                    presetStatus
                     presetButtons
                 }
                 .padding(.bottom, 16)
@@ -54,6 +56,42 @@ struct ControlPanel: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    // MARK: - Star Stable quick-connect banner (shown when no window selected)
+
+    @ViewBuilder
+    private var ssoQuickConnect: some View {
+        if manager.targetWindowTitle == "Не выбрано" {
+            Button {
+                manager.onPickWindow?()
+            } label: {
+                HStack(spacing: 8) {
+                    Text("⭐")
+                        .font(.system(size: 14))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Подключить Star Stable")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text("Нажми, затем выбери окно игры")
+                            .font(.system(size: 9))
+                            .foregroundColor(Neon.dim)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(Neon.dim)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Neon.cyan.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Neon.cyan.opacity(0.2), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+        }
     }
 
     // MARK: - Window picker row
@@ -130,6 +168,41 @@ struct ControlPanel: View {
         .opacity(manager.isEnabled ? 1 : 0.4)
         .animation(.easeInOut(duration: 0.2), value: manager.isEnabled)
         .allowsHitTesting(manager.isEnabled)
+    }
+
+    // MARK: - Preset status indicator
+
+    @ViewBuilder
+    private var presetStatus: some View {
+        if let status = manager.lastPresetStatus {
+            let isError = status.contains("Не найдено") || status.contains("Ни один")
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: isError ? "exclamationmark.triangle" : "checkmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(isError ? .orange : Neon.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !manager.lastPresetName.isEmpty {
+                        Text(manager.lastPresetName)
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+                    Text(status)
+                        .font(.system(size: 8))
+                        .foregroundColor(isError ? .orange : Neon.green)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background((isError ? Color.orange : Neon.green).opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(
+                (isError ? Color.orange : Neon.green).opacity(0.2), lineWidth: 1))
+            .padding(.horizontal, 8)
+            .padding(.top, 4)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
     }
 
     // MARK: - Preset buttons

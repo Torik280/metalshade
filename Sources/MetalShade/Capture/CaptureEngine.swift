@@ -15,13 +15,24 @@ final class CaptureEngine: NSObject {
     }
 
     // Returns all windows with titles (for the picker)
-    static func availableWindows() async -> [SCWindow] {
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(
-            false, onScreenWindowsOnly: true
-        ) else { return [] }
+    static func availableWindows() async throws -> [SCWindow] {
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            false, onScreenWindowsOnly: false
+        )
         return content.windows.filter {
             guard let title = $0.title else { return false }
             return !title.isEmpty
+        }
+    }
+
+    // Find Star Stable window specifically
+    static func findStarStable() async -> SCWindow? {
+        guard let windows = try? await availableWindows() else { return nil }
+        let ssKeywords = ["star stable", "starstable", "sso"]
+        return windows.first { w in
+            let appName = (w.owningApplication?.applicationName ?? "").lowercased()
+            let title   = (w.title ?? "").lowercased()
+            return ssKeywords.contains(where: { appName.contains($0) || title.contains($0) })
         }
     }
 

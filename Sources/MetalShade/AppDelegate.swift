@@ -30,6 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupControlPanel()
         wireCallbacks()
+
+        // Try to auto-connect to Star Stable if it's already running
+        Task {
+            if let ssWindow = await CaptureEngine.findStarStable() {
+                await MainActor.run { self.selectWindow(ssWindow) }
+            }
+        }
     }
 
     // MARK: - Control panel
@@ -104,31 +111,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showWindowPicker() {
         Task { @MainActor in
-            let windows = await CaptureEngine.availableWindows()
+            let windows: [SCWindow]
+            do {
+                windows = try await CaptureEngine.availableWindows()
+            } catch {
+                let alert = NSAlert()
+                alert.messageText     = "Нет доступа к списку окон"
+                alert.informativeText = "Открой Системные настройки → Конфиденциальность и безопасность → Запись экрана и разреши MetalShade.\n\nОшибка: \(error.localizedDescription)"
+                alert.alertStyle      = .warning
+                alert.addButton(withTitle: "Открыть настройки")
+                alert.addButton(withTitle: "Закрыть")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                }
+                return
+            }
+
             guard !windows.isEmpty else {
                 let alert = NSAlert()
-                alert.messageText    = "Нет доступных окон"
-                alert.informativeText = "Запусти нужное приложение и попробуй снова."
+                alert.messageText     = "Нет доступных окон"
+                alert.informativeText = "Запусти Star Stable Online и нажми «Выбрать» снова."
                 alert.runModal()
                 return
             }
 
             let menu = NSMenu(title: "Выбрать окно")
-            for window in windows {
-                let title     = window.title ?? "Без названия"
-                let appName   = window.owningApplication?.applicationName ?? ""
-                let label     = appName.isEmpty ? title : "\(appName) — \(title)"
-                let item      = NSMenuItem(title: label, action: #selector(self.windowMenuItemSelected(_:)),
-                                           keyEquivalent: "")
-                item.target   = self
+
+            // Pin Star Stable to the top if present
+            let sorted = windows.sorted { a, _ in
+                let n = (a.owningApplication?.applicationName ?? "").lowercased()
+                return n.contains("star stable") || n.contains("starstable")
+            }
+
+            for window in sorted {
+                let title   = window.title ?? "Без названия"
+                let appName = window.owningApplication?.applicationName ?? ""
+                var label   = appName.isEmpty ? title : "\(appName) — \(title)"
+                if appName.lowercased().contains("star stable") || appName.lowercased().contains("starstable") {
+                    label = "⭐ " + label
+                }
+                let item           = NSMenuItem(title: label,
+                                                action: #selector(self.windowMenuItemSelected(_:)),
+                                                keyEquivalent: "")
+                item.target            = self
                 item.representedObject = window
                 menu.addItem(item)
             }
 
-            // Show near the control panel
             if let panel = controlPanel {
-                let origin = NSPoint(x: panel.frame.minX + 10,
-                                     y: panel.frame.maxY - 30)
+                let origin = NSPoint(x: panel.frame.minX + 10, y: panel.frame.maxY - 30)
                 menu.popUp(positioning: nil, at: origin, in: nil)
             }
         }
@@ -279,7 +310,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let preset else { return }
 
         DispatchQueue.main.async {
-            self.shaderManager.applyPreset(preset)
+            let summary = self.shaderManager.applyPreset(preset)
+            self.shaderManager.lastPresetName   = url.deletingPathExtension().lastPathComponent
+            self.shaderManager.lastPresetStatus = summary
+
+            // Brief success flash then clear after 4 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                self.shaderManager.lastPresetStatus = nil
+            }
         }
     }
 
