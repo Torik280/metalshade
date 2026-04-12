@@ -15,6 +15,8 @@ struct ControlPanel: View {
                     effectsList
                     SectionHeader(title: "SHADERS")
                     loadShaderButton
+                    SectionHeader(title: "PRESET")
+                    presetButtons
                 }
                 .padding(.bottom, 16)
             }
@@ -128,6 +130,50 @@ struct ControlPanel: View {
         .opacity(manager.isEnabled ? 1 : 0.4)
         .animation(.easeInOut(duration: 0.2), value: manager.isEnabled)
         .allowsHitTesting(manager.isEnabled)
+    }
+
+    // MARK: - Preset buttons
+
+    private var presetButtons: some View {
+        HStack(spacing: 6) {
+            Button {
+                manager.onLoadPreset?()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "tray.and.arrow.down")
+                        .font(.system(size: 10))
+                    Text("Загрузить .ini")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(Neon.green)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(Neon.green.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Neon.green.opacity(0.25), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                manager.onSavePreset?()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "tray.and.arrow.up")
+                        .font(.system(size: 10))
+                    Text("Сохранить .ini")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(Neon.purple)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(Neon.purple.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Neon.purple.opacity(0.25), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
     }
 
     // MARK: - Load shader button

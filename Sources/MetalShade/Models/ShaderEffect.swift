@@ -70,7 +70,38 @@ final class ShaderManager: ObservableObject {
     // Callbacks set by AppDelegate
     var onPickWindow:  (() -> Void)?
     var onLoadShader:  (() -> Void)?
+    var onLoadPreset:  (() -> Void)?
+    var onSavePreset:  (() -> Void)?
     var onAddPipeline: ((String, String) -> Bool)?
+
+    /// Apply a loaded preset: enable/disable effects and set param values.
+    /// Effects that are listed in the preset but not yet loaded are silently skipped.
+    func applyPreset(_ preset: PresetManager.LoadedPreset) {
+        for effect in effects {
+            // Determine enabled state from Techniques list
+            let inTechniques = preset.enabledTechniques.contains(where: {
+                $0.caseInsensitiveCompare(effect.name) == .orderedSame ||
+                $0.caseInsensitiveCompare(effect.functionName) == .orderedSame
+            })
+            effect.isEnabled = inTechniques
+
+            // Find a matching section — try "Name.fx", "functionName.fx", exact name
+            let candidates = ["\(effect.name).fx", "\(effect.functionName).fx", effect.name]
+            guard let section = candidates.first(where: { preset.params[$0] != nil }),
+                  let sectionParams = preset.params[section] else { continue }
+
+            for param in effect.params {
+                // Match by exact name or case-insensitive
+                if let val = sectionParams[param.name] {
+                    param.value = min(param.max, max(param.min, val))
+                } else if let entry = sectionParams.first(where: {
+                    $0.key.caseInsensitiveCompare(param.name) == .orderedSame
+                }) {
+                    param.value = min(param.max, max(param.min, entry.value))
+                }
+            }
+        }
+    }
 
     func addCustomShader(name: String, functionName: String,
                          source: String, params: [ShaderParam]) -> Bool {

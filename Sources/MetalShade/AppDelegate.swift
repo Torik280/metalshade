@@ -80,6 +80,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shaderManager.onLoadShader = { [weak self] in
             self?.showShaderFilePicker()
         }
+        shaderManager.onLoadPreset = { [weak self] in
+            self?.showPresetLoadPicker()
+        }
+        shaderManager.onSavePreset = { [weak self] in
+            self?.showPresetSavePicker()
+        }
 
         shaderManager.$isEnabled
             .receive(on: DispatchQueue.main)
@@ -250,6 +256,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showError("Ошибка компиляции конвертированного шейдера.\n" +
                           "Шейдер может использовать неподдерживаемые HLSL функции.")
             }
+        }
+    }
+
+    // MARK: - Preset load / save
+
+    private func showPresetLoadPicker() {
+        let panel = NSOpenPanel()
+        panel.title               = "Загрузить пресет"
+        panel.canChooseFiles      = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if #available(macOS 12.0, *) {
+            if let ini = UTType(filenameExtension: "ini") {
+                panel.allowedContentTypes = [ini]
+            }
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let (preset, error) = PresetManager.load(from: url)
+        if let err = error { showError(err); return }
+        guard let preset else { return }
+
+        DispatchQueue.main.async {
+            self.shaderManager.applyPreset(preset)
+        }
+    }
+
+    private func showPresetSavePicker() {
+        let panel = NSSavePanel()
+        panel.title              = "Сохранить пресет"
+        panel.nameFieldStringValue = "MetalShadePreset.ini"
+        if #available(macOS 12.0, *) {
+            if let ini = UTType(filenameExtension: "ini") {
+                panel.allowedContentTypes = [ini]
+            }
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if let err = PresetManager.save(effects: shaderManager.effects, to: url) {
+            showError(err)
         }
     }
 
