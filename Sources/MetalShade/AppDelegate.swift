@@ -156,7 +156,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.overlayWindow?.matchWindow(cgFrame: frame, on: screen)
                 if self.shaderManager.isEnabled { self.overlayWindow?.orderFront(nil) }
             } catch {
-                self.showCapturePermissionError(error)
+                let nsError = error as NSError
+                // Error code 3 is "app not found in SCK" — not a permission problem
+                if nsError.domain == "CaptureEngine" && nsError.code == 3 {
+                    self.showAppNotFoundError(app)
+                } else {
+                    self.showCapturePermissionError(error, retryApp: app)
+                }
             }
         }
     }
@@ -242,23 +248,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let err = PresetManager.save(effects: shaderManager.effects, to: url) { showError(err) }
     }
 
-    private func showCapturePermissionError(_ error: Error) {
+    private func showCapturePermissionError(_ error: Error, retryApp: CaptureEngine.AppInfo? = nil) {
         let alert = NSAlert()
         alert.messageText = "Нет доступа к захвату экрана"
         alert.informativeText = """
-            macOS требует разрешение заново после каждой пересборки приложения.
+            MetalShade нужно разрешение на Запись экрана.
 
-            Сделай следующее:
-            1. Открой Системные настройки → Конфиденциальность и безопасность → Запись экрана
-            2. Найди MetalShade в списке — сними галочку и поставь снова
-               (или нажми «+» и добавь MetalShade вручную)
-            3. Перезапусти MetalShade
+            1. Нажми «Открыть настройки» ниже
+            2. Найди MetalShade → включи переключатель
+               (если уже включён — выключи и включи снова)
+            3. Вернись в MetalShade и нажми «Повторить»
 
             Ошибка: \(error.localizedDescription)
             """
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Открыть настройки")
+        if retryApp != nil { alert.addButton(withTitle: "Повторить") }
         alert.addButton(withTitle: "Закрыть")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(
+                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+            )
+        } else if let app = retryApp, response.rawValue == 1001 {
+            // "Повторить" — retry after user granted permission
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.selectApp(app)
+            }
+        }
+    }
+
+    private func showAppNotFoundError(_ app: CaptureEngine.AppInfo) {
+        let alert = NSAlert()
+        alert.messageText = "Приложение не найдено"
+        alert.informativeText = """
+            «\(app.name)» запущено, но ScreenCaptureKit его не видит.
+
+            Возможные причины:
+            • У приложения нет видимых окон — открой игру в оконном режиме
+            • Приложение запущено под другим пользователем
+            • Нет разрешения на Запись экрана
+
+            Попробуй выбрать приложение ещё раз после того, как оно откроет окно.
+            """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Открыть настройки записи")
+        alert.addButton(withTitle: "OK")
         if alert.runModal() == .alertFirstButtonReturn {
             NSWorkspace.shared.open(
                 URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!

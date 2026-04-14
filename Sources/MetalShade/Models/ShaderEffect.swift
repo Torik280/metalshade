@@ -102,8 +102,8 @@ final class ShaderManager: ObservableObject {
 
             if let key = sectionKey, let sectionParams = preset.params[key] {
                 applyParams(sectionParams, to: effect)
-                if effect.isEnabled { matched.append(effect.name) }
             }
+            if effect.isEnabled { matched.append(effect.name) }
         }
 
         // Report techniques that have no matching built-in effect

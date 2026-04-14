@@ -10,9 +10,19 @@ final class CaptureEngine: NSObject {
 
     // MARK: - Permission
 
+    /// Requests screen recording permission.
+    /// Calls both the legacy CGWindowList path AND ScreenCaptureKit to ensure
+    /// the TCC dialog appears on first launch for the right permission category.
     static func requestPermission() {
         if !CGPreflightScreenCaptureAccess() {
             CGRequestScreenCaptureAccess()
+        }
+        // Prime ScreenCaptureKit authorization — this triggers the macOS
+        // "Screen Recording" TCC prompt if not yet granted.
+        Task {
+            _ = try? await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: false
+            )
         }
     }
 

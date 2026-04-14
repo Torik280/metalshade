@@ -31,8 +31,9 @@ struct PresetManager {
         var params:         [String: [String: Float]]   = [:]
         var currentSection: String?                     = nil
 
+        // Support both Unix (\n) and Windows (\r\n) line endings
         for rawLine in text.components(separatedBy: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty, !line.hasPrefix(";"), !line.hasPrefix("#") else { continue }
 
             // Section header [FileName.fx]
@@ -42,8 +43,8 @@ struct PresetManager {
             }
 
             guard let eqIdx = line.firstIndex(of: "=") else { continue }
-            let key   = String(line[..<eqIdx]).trimmingCharacters(in: .whitespaces)
-            let value = String(line[line.index(after: eqIdx)...]).trimmingCharacters(in: .whitespaces)
+            let key   = String(line[..<eqIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = String(line[line.index(after: eqIdx)...]).trimmingCharacters(in: .whitespacesAndNewlines)
 
             if currentSection == nil {
                 // Global keys
@@ -51,7 +52,7 @@ struct PresetManager {
                     // Format: "TechniqueName@FileName.fx,..." or just "TechniqueName,..."
                     techniques = value
                         .components(separatedBy: ",")
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }
                         .map { entry -> EnabledTechnique in
                             if let atIdx = entry.firstIndex(of: "@") {

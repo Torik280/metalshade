@@ -3,6 +3,7 @@
     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Disable sandbox so TCC can grant Screen Recording directly -->
     <key>com.apple.security.app-sandbox</key>
     <false/>
 </dict>
