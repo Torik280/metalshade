@@ -232,46 +232,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // First pass: apply to built-in/already-loaded effects
         var result = shaderManager.applyPreset(preset)
 
-        // Auto-load unmatched .fx files from the same folder as the INI
-        if !result.unmatchedFiles.isEmpty {
-            let iniDir   = url.deletingLastPathComponent()
-            let loaded   = autoLoadShaders(fileNames: result.unmatchedFiles, from: iniDir)
+        let iniDir   = url.deletingLastPathComponent()
+        let presetName = url.deletingPathExtension().lastPathComponent
+        shaderManager.lastPresetName   = presetName
+        shaderManager.lastPresetStatus = result.summary
 
-            if !loaded.isEmpty {
-                // Second pass: now that custom shaders are loaded, re-apply the preset
-                result = shaderManager.applyPreset(preset)
-            }
+        // Auto-load unmatched .fx: first local, then download — runs async
+        guard !result.unmatchedFiles.isEmpty else {
+            scheduleStatusClear()
+            return
         }
 
-        shaderManager.lastPresetName   = url.deletingPathExtension().lastPathComponent
-        shaderManager.lastPresetStatus = result.summary
-        DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
+        let unmatchedFiles = result.unmatchedFiles
+        let savedPreset    = preset
+        Task { @MainActor in
+            let loaded = await autoLoadShaders(fileNames: unmatchedFiles, from: iniDir)
+            if !loaded.isEmpty {
+                let final = shaderManager.applyPreset(savedPreset)
+                shaderManager.lastPresetStatus = final.summary
+            }
+            scheduleStatusClear()
+        }
+    }
+
+    private func scheduleStatusClear() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
             self.shaderManager.lastPresetStatus = nil
         }
     }
 
-    /// Scans `directory` for the given .fx / .metal filenames and silently loads
-    /// the ones found. Already-loaded shaders with the same name are skipped.
-    /// Returns the display names of successfully loaded shaders.
-    @discardableResult
-    private func autoLoadShaders(fileNames: [String], from directory: URL) -> [String] {
+    /// For each fileName:
+    ///   1. Check local `directory`
+    ///   2. Check on-disk cache (~/Library/Application Support/MetalShade/Shaders/)
+    ///   3. Download from known ReShade repos
+    /// Updates lastPresetStatus with progress. Returns display names of loaded shaders.
+    private func autoLoadShaders(fileNames: [String], from directory: URL) async -> [String] {
         var loaded: [String] = []
-        let fm = FileManager.default
+        let fm   = FileManager.default
+        let total = fileNames.count
 
-        for fileName in fileNames {
-            let fileURL = directory.appendingPathComponent(fileName)
-            guard fm.fileExists(atPath: fileURL.path),
-                  let source = try? String(contentsOf: fileURL, encoding: .utf8)
+        for (idx, fileName) in fileNames.enumerated() {
+            let baseName = URL(fileURLWithPath: fileName)
+                .deletingPathExtension().lastPathComponent
+
+            // Skip duplicates
+            guard !shaderManager.effects.contains(where: {
+                $0.name.lowercased() == baseName.lowercased()
+            }) else { continue }
+
+            // Progress label
+            shaderManager.lastPresetStatus =
+                "[\(idx + 1)/\(total)] \(baseName)…"
+
+            // Resolve source file: local → cache → download
+            var fileURL: URL?
+            let localURL = directory.appendingPathComponent(fileName)
+            if fm.fileExists(atPath: localURL.path) {
+                fileURL = localURL
+            } else {
+                fileURL = await ShaderDownloader.download(fileName)
+            }
+
+            guard let url = fileURL,
+                  let source = try? String(contentsOf: url, encoding: .utf8)
             else { continue }
 
-            let ext = fileURL.pathExtension.lowercased()
-            let baseName = fileURL.deletingPathExtension().lastPathComponent
-
-            // Skip if an effect with this name is already loaded
-            if shaderManager.effects.contains(where: {
-                $0.name.lowercased() == baseName.lowercased()
-            }) { continue }
-
+            let ext = url.pathExtension.lowercased()
             if ext == "metal" {
                 let fnName = "fx_" + FXConverter.sanitizeName(baseName)
                 let params = [ShaderParam(name: "intensity", label: "Intensity",
@@ -287,8 +313,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ShaderParam(name: $0.name, label: $0.label,
                                 min: $0.min, max: $0.max, value: $0.defaultValue)
                 }
-                if shaderManager.addCustomShader(name: res.displayName, functionName: res.functionName,
-                                                 source: res.mslSource, params: params) {
+                if shaderManager.addCustomShader(name: res.displayName,
+                                                 functionName: res.functionName,
+                                                 source: res.mslSource,
+                                                 params: params) {
                     loaded.append(res.displayName)
                 }
             }
