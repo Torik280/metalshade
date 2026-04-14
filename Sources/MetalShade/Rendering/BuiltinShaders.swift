@@ -18,7 +18,8 @@ kernel void fx_sharpen(
     float4 b = inTex.read(uint2(gid.x, min(gid.y+1u, h-1u)));
 
     float4 lap = 4.0*c - l - r - t - b;
-    outTex.write(clamp(c + lap * intensity * 0.8, 0.0, 1.0), gid);
+    float3 sharpened = clamp((c + lap * intensity * 0.8).rgb, 0.0, 1.0);
+    outTex.write(float4(sharpened, c.a), gid);
 }
 
 kernel void fx_vibrance(
@@ -36,8 +37,8 @@ kernel void fx_vibrance(
     float sat   = maxC - minC;
     float luma  = dot(c.rgb, float3(0.2126, 0.7152, 0.0722));
     float boost = (intensity * 1.2) * (1.0 - sat);
-    c.rgb = mix(float3(luma), c.rgb, 1.0 + boost);
-    outTex.write(clamp(c, 0.0, 1.0), gid);
+    float3 rgb  = clamp(mix(float3(luma), c.rgb, 1.0 + boost), 0.0, 1.0);
+    outTex.write(float4(rgb, c.a), gid);
 }
 
 kernel void fx_bloom(
@@ -68,7 +69,8 @@ kernel void fx_bloom(
         }
     }
     glow = (wTotal > 0.0) ? (glow / wTotal) : float4(0.0);
-    outTex.write(clamp(original + glow * intensity * 1.5, 0.0, 1.0), gid);
+    float3 bloomed = clamp((original + glow * intensity * 1.5).rgb, 0.0, 1.0);
+    outTex.write(float4(bloomed, original.a), gid);
 }
 
 kernel void fx_vignette(
@@ -84,8 +86,7 @@ kernel void fx_vignette(
     float2 uv = float2(gid) / float2(w, h) - 0.5;
     uv.x *= float(w) / float(h);
     float v = 1.0 - smoothstep(0.25, 0.75, length(uv) * intensity * 2.2);
-    c.rgb *= v;
-    outTex.write(c, gid);
+    outTex.write(float4(c.rgb * v, c.a), gid);
 }
 
 kernel void fx_contrast(
@@ -101,8 +102,8 @@ kernel void fx_contrast(
     float  amount = (intensity - 0.5) * 2.0;
     float3 s      = c.rgb;
     float3 curve  = s * s * (3.0 - 2.0 * s);
-    c.rgb = mix(s, curve, amount);
-    outTex.write(clamp(c, 0.0, 1.0), gid);
+    float3 rgb    = clamp(mix(s, curve, amount), 0.0, 1.0);
+    outTex.write(float4(rgb, c.a), gid);
 }
 
 struct DisplayVert {

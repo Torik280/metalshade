@@ -151,14 +151,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             do {
-                let frame = try await engine.start(appPID: app.pid)
+                let session = try await engine.start(appPID: app.pid)
                 guard let screen = NSScreen.main else { return }
-                self.overlayWindow?.matchWindow(cgFrame: frame, on: screen)
+                self.overlayWindow?.matchWindow(cgFrame: session.overlayFrame, on: screen)
                 if self.shaderManager.isEnabled { self.overlayWindow?.orderFront(nil) }
             } catch {
                 let nsError = error as NSError
-                // Error code 3 is "app not found in SCK" — not a permission problem
-                if nsError.domain == "CaptureEngine" && nsError.code == 3 {
+                if nsError.domain == "CaptureEngine" && (nsError.code == 3 || nsError.code == 4) {
                     self.showAppNotFoundError(app)
                 } else {
                     self.showCapturePermissionError(error, retryApp: app)

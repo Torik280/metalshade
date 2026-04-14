@@ -10,15 +10,10 @@ final class CaptureEngine: NSObject {
 
     // MARK: - Permission
 
-    /// Requests screen recording permission.
-    /// Calls both the legacy CGWindowList path AND ScreenCaptureKit to ensure
-    /// the TCC dialog appears on first launch for the right permission category.
     static func requestPermission() {
         if !CGPreflightScreenCaptureAccess() {
             CGRequestScreenCaptureAccess()
         }
-        // Prime ScreenCaptureKit authorization — this triggers the macOS
-        // "Screen Recording" TCC prompt if not yet granted.
         Task {
             _ = try? await SCShareableContent.excludingDesktopWindows(
                 false, onScreenWindowsOnly: false
@@ -26,7 +21,7 @@ final class CaptureEngine: NSObject {
         }
     }
 
-    // MARK: - App enumeration (NSWorkspace — no permission needed)
+    // MARK: - App enumeration
 
     struct AppInfo {
         let name:     String
@@ -35,7 +30,6 @@ final class CaptureEngine: NSObject {
         let icon:     NSImage?
     }
 
-    /// Returns all regular (visible) running apps. No Screen Recording permission required.
     static func runningApps() -> [AppInfo] {
         NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
@@ -46,7 +40,6 @@ final class CaptureEngine: NSObject {
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 
-    /// Find Star Stable in the running app list.
     static func findStarStable() -> AppInfo? {
         let keywords = ["star stable", "starstable", "sso"]
         return runningApps().first { app in
@@ -56,19 +49,25 @@ final class CaptureEngine: NSObject {
         }
     }
 
-    // MARK: - Capture by app PID
+    // MARK: - Capture session
 
-    /// Captures everything on the main display that belongs to the given app.
-    /// Returns the display frame (overlay should cover the full screen).
-    func start(appPID: pid_t) async throws -> CGRect {
+    struct CaptureSession {
+        /// Window frame in CG-point coordinates (top-left origin).
+        /// The overlay is sized and positioned to exactly this rect.
+        let overlayFrame: CGRect
+    }
+
+    // MARK: - Start
+
+    /// Finds the main window of the target app and captures it independently.
+    /// Uses SCContentFilter(desktopIndependentWindow:) so the captured texture
+    /// is exactly the window — no extra screen area, no transparency issues.
+    func start(appPID: pid_t) async throws -> CaptureSession {
         let content = try await SCShareableContent.excludingDesktopWindows(
-            false, onScreenWindowsOnly: false
+            false, onScreenWindowsOnly: true
         )
-        guard let display = content.displays.first else {
-            throw NSError(domain: "CaptureEngine", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: "Дисплей не найден"])
-        }
-        guard let scApp = content.applications.first(where: { $0.processID == appPID }) else {
+
+        guard content.applications.contains(where: { $0.processID == appPID }) else {
             throw NSError(domain: "CaptureEngine", code: 3,
                           userInfo: [NSLocalizedDescriptionKey:
                             "Приложение не найдено в ScreenCaptureKit.\n" +
@@ -76,17 +75,32 @@ final class CaptureEngine: NSObject {
                             "Запись экрана разрешено MetalShade, затем перезапусти MetalShade."])
         }
 
-        let filter = SCContentFilter(display: display,
-                                     including: [scApp],
-                                     exceptingWindows: [])
+        // Find the main (largest visible) window of the target app
+        let appWindows = content.windows.filter {
+            $0.owningApplication?.processID == appPID &&
+            $0.isOnScreen &&
+            $0.windowLayer == 0 &&
+            $0.frame.width > 50 && $0.frame.height > 50
+        }
+        guard let mainWindow = appWindows.max(by: {
+            $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+        }) else {
+            throw NSError(domain: "CaptureEngine", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "У приложения нет видимых окон.\n" +
+                            "Открой приложение в оконном режиме и попробуй снова."])
+        }
 
+        // Capture this specific window — texture = exactly the window, no other content
+        let filter = SCContentFilter(desktopIndependentWindow: mainWindow)
+
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let config = SCStreamConfiguration()
         config.pixelFormat          = kCVPixelFormatType_32BGRA
         config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        config.width                = display.width
-        config.height               = display.height
+        config.width                = Int(mainWindow.frame.width  * scale)
+        config.height               = Int(mainWindow.frame.height * scale)
         config.capturesAudio        = false
-        if #available(macOS 14.0, *) { config.shouldBeOpaque = true }
         config.colorSpaceName       = CGColorSpace.sRGB
 
         stream = SCStream(filter: filter, configuration: config, delegate: self)
@@ -94,8 +108,8 @@ final class CaptureEngine: NSObject {
                                     sampleHandlerQueue: .global(qos: .userInteractive))
         try await stream?.startCapture()
 
-        // Return full display frame in CG coordinates
-        return CGRect(x: 0, y: 0, width: display.width, height: display.height)
+        // mainWindow.frame is in CG-point coordinates (top-left origin) — pass directly
+        return CaptureSession(overlayFrame: mainWindow.frame)
     }
 
     func stop() async {

@@ -87,8 +87,16 @@ final class MetalRenderer {
         let desc = MTLRenderPipelineDescriptor()
         desc.vertexFunction   = lib.makeFunction(name: "displayVertex")
         desc.fragmentFunction = lib.makeFunction(name: "displayFragment")
-        desc.colorAttachments[0].pixelFormat        = .bgra8Unorm
-        desc.colorAttachments[0]!.isBlendingEnabled = false
+        desc.colorAttachments[0].pixelFormat = .bgra8Unorm
+
+        // Standard over-compositing: processed window blends onto the transparent overlay
+        let att = desc.colorAttachments[0]!
+        att.isBlendingEnabled             = true
+        att.sourceRGBBlendFactor          = .sourceAlpha
+        att.destinationRGBBlendFactor     = .oneMinusSourceAlpha
+        att.sourceAlphaBlendFactor        = .one
+        att.destinationAlphaBlendFactor   = .oneMinusSourceAlpha
+
         do {
             displayPipeline = try device.makeRenderPipelineState(descriptor: desc)
         } catch {
