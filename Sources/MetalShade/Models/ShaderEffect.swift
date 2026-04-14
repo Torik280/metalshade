@@ -77,11 +77,18 @@ final class ShaderManager: ObservableObject {
     var onSavePreset:  (() -> Void)?
     var onAddPipeline: ((String, String) -> Bool)?
 
-    /// Apply a loaded preset. Returns human-readable summary of what was applied.
+    struct PresetResult {
+        let summary:        String
+        /// .fx filenames from the preset that didn't match any loaded effect.
+        /// Used by AppDelegate to auto-load these files from the INI's directory.
+        let unmatchedFiles: [String]
+    }
+
+    /// Apply a loaded preset. Returns summary + list of unmatched .fx filenames.
     @discardableResult
-    func applyPreset(_ preset: PresetManager.LoadedPreset) -> String {
-        var matched:   [String] = []
-        var unmatched: [String] = []
+    func applyPreset(_ preset: PresetManager.LoadedPreset) -> PresetResult {
+        var matched:        [String] = []
+        var unmatchedTechs: [PresetManager.EnabledTechnique] = []
 
         for effect in effects {
             // Match against both technique name AND .fx filename
@@ -106,26 +113,30 @@ final class ShaderManager: ObservableObject {
             if effect.isEnabled { matched.append(effect.name) }
         }
 
-        // Report techniques that have no matching built-in effect
+        // Collect techniques that have no matching effect (built-in or custom)
         for tech in preset.techniques {
             let hasMatch = effects.contains(where: {
                 fuzzyMatch(tech.name, effect: $0) || fuzzyMatch(tech.fileName, effect: $0)
             })
-            if !hasMatch { unmatched.append(tech.name) }
+            if !hasMatch { unmatchedTechs.append(tech) }
         }
 
         var summary: String
         if matched.isEmpty {
-            summary = "Ни один встроенный эффект не совпал.\nЗагрузи нужные .fx файлы через «Загрузить .fx»."
+            summary = "Ищу .fx файлы в папке пресета…"
         } else {
             summary = "Включено: \(matched.joined(separator: ", "))"
         }
-        if !unmatched.isEmpty {
-            let list = unmatched.prefix(6).joined(separator: ", ")
-            let more = unmatched.count > 6 ? " и ещё \(unmatched.count - 6)..." : ""
-            summary += "\n\nНужны .fx файлы: \(list)\(more)"
+        if !unmatchedTechs.isEmpty {
+            let names = unmatchedTechs.prefix(4).map { $0.name }.joined(separator: ", ")
+            let more  = unmatchedTechs.count > 4 ? " +\(unmatchedTechs.count - 4)..." : ""
+            summary += "\n\nАвто-загрузка: \(names)\(more)"
         }
-        return summary
+
+        return PresetResult(
+            summary:        summary,
+            unmatchedFiles: unmatchedTechs.map { $0.fileName }
+        )
     }
 
     /// Try to set effect param values from the section params dict.

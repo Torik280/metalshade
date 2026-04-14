@@ -17,17 +17,16 @@ cp ".build/apple/Products/Release/MetalShade" "$APP/Contents/MacOS/MetalShade" 2
 cp "Sources/MetalShade/Info.plist" "$APP/Contents/Info.plist"
 
 echo "Signing..."
-# NOTE: --options runtime (Hardened Runtime) with ad-hoc signing (-) causes macOS
-# to revoke the Screen Recording TCC permission on every rebuild.
-# Omitting it lets the permission persist across rebuilds for the same bundle ID.
 codesign --force --deep --sign - --entitlements MetalShade.entitlements "$APP"
+
+echo "Resetting Screen Recording permission (ensures fresh TCC prompt on next launch)..."
+tccutil reset ScreenCapture com.metalshade.app 2>/dev/null || true
 
 echo ""
 echo "Done → $APP"
 echo ""
-echo "FIRST RUN: macOS will ask for Screen Recording permission."
-echo "If it shows 'No access' — go to:"
-echo "  System Settings → Privacy & Security → Screen Recording"
-echo "  Toggle MetalShade OFF then ON, then click 'Retry' in the error dialog."
+echo "При первом запуске macOS ПОПРОСИТ разрешение на Запись экрана — нажми OK."
+echo "Если разрешение не появилось: Системные настройки → Конфиденциальность → Запись экрана"
+echo "  → найди MetalShade, включи переключатель."
 echo ""
-echo "To launch: open $APP"
+echo "Запустить: open $APP"
